@@ -42,7 +42,13 @@ namespace Ocelot.DownstreamUrlCreator.Middleware
 
             context.DownstreamRequest.Scheme = context.DownstreamReRoute.DownstreamScheme;
 
-            if (ServiceFabricRequest(context))
+            if (ServiceFabricTypeRequest(context))
+            {
+                var pathAndQuery = CreateServiceFabricUriForType(context, dsPath);
+                context.DownstreamRequest.AbsolutePath = pathAndQuery.path;
+                context.DownstreamRequest.Query = pathAndQuery.query;
+            }
+            else if (ServiceFabricRequest(context))
             {
                 var pathAndQuery = CreateServiceFabricUri(context, dsPath);
                 context.DownstreamRequest.AbsolutePath = pathAndQuery.path;
@@ -60,8 +66,22 @@ namespace Ocelot.DownstreamUrlCreator.Middleware
 
         private (string path, string query) CreateServiceFabricUri(DownstreamContext context, Response<DownstreamPath> dsPath)
         {
-            var query = context.DownstreamRequest.Query;           
+            var query = context.DownstreamRequest.Query;
             var serviceFabricPath = $"/{context.DownstreamReRoute.ServiceName + dsPath.Data.Value}";
+
+            if (RequestForStatefullService(query))
+            {
+                return (serviceFabricPath, query);
+            }
+
+            var split = string.IsNullOrEmpty(query) ? "?" : "&";
+            return (serviceFabricPath, $"{query}{split}cmd=instance");
+        }
+
+        private (string path, string query) CreateServiceFabricUriForType(DownstreamContext context, Response<DownstreamPath> dsPath)
+        {
+            var query = context.DownstreamRequest.Query;
+            var serviceFabricPath = dsPath.Data.Value;
 
             if (RequestForStatefullService(query))
             {
@@ -74,9 +94,14 @@ namespace Ocelot.DownstreamUrlCreator.Middleware
 
         private static bool ServiceFabricRequest(DownstreamContext context)
         {
-            return context.ServiceProviderConfiguration.Type == "ServiceFabric" && context.DownstreamReRoute.UseServiceDiscovery;
+            return context.ServiceProviderConfiguration.Type == "ServiceFabric" && context.DownstreamReRoute.UseServiceDiscovery && !context.DownstreamReRoute.ServiceName.Contains(":");
         }
-
+        
+        private static bool ServiceFabricTypeRequest(DownstreamContext context)
+        {
+            return context.ServiceProviderConfiguration.Type == "ServiceFabric" && context.DownstreamReRoute.UseServiceDiscovery && context.DownstreamReRoute.ServiceName.Contains(":");
+        }
+        
         private static bool RequestForStatefullService(string query)
         {
             return query.Contains("PartitionKind") && query.Contains("PartitionKey");
